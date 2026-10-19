@@ -4,7 +4,10 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "typecheck": "bun check"
+    "typecheck": "bun check", 
+    "build": "bun build --compile index.ts --outfile weather",
+    "start": "bun run index.ts",
+    "dev": "bun run index.ts --watch"
   },
   "devDependencies": {
     "@types/bun": "latest"
