@@ -1,5 +1,5 @@
 import { stdin, stdout } from "node:process";
-import type { Clima } from "./api";
+import type { Clima, ResultadoBusqueda } from "./api";
 import type { Config, Paleta } from "./store";
 
 // Lector de líneas propio en lugar de node:readline/promises: en Bun la segunda
@@ -224,6 +224,22 @@ export async function seleccionar(items: string[], titulo: string): Promise<numb
     if (Number.isInteger(n) && n >= 1 && n <= items.length) return n - 1;
     fallo("Selección no válida.");
   }
+}
+
+function fmtPoblacion(n: number | null): string {
+  if (n === null || n <= 0) return "";
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1).replace(".", ",")} M hab.`;
+  if (n >= 1_000) return `${Math.round(n / 1000)} mil hab.`;
+  return `${n} hab.`;
+}
+
+/**
+ * Etiqueta de un resultado de geocoding. La región, el país y la población son
+ * lo que permite distinguir ciudades homónimas (p. ej. los muchos Springfield).
+ */
+export function etiquetaBusqueda(r: ResultadoBusqueda): string {
+  const poblacion = fmtPoblacion(r.poblacion);
+  return poblacion ? `${r.detalle} · ${poblacion}` : r.detalle;
 }
 
 export function fmtClima(nombre: string, c: Clima): string {

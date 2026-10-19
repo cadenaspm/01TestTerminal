@@ -3,6 +3,7 @@ import { cargar, guardar, type Ciudad, type Paleta } from "./src/store";
 import {
   aviso,
   establecerPaleta,
+  etiquetaBusqueda,
   exito,
   fallo,
   fmtClima,
@@ -64,7 +65,7 @@ async function buscarAgregar(): Promise<void> {
   }
 
   const idx = await seleccionar(
-    resultados.map((r) => r.detalle),
+    resultados.map((r) => etiquetaBusqueda(r)),
     `Resultados para "${nombre}":`,
   );
   if (idx === null) return;

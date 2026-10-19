@@ -4,7 +4,8 @@
 
 Bun + TypeScript CLI weather app. Entry point: root `index.ts` (main menu loop). Logic split in:
 
-- `src/api.ts` — Open-Meteo, **no API key needed**. Two-step flow: (1) geocode city name: `https://geocoding-api.open-meteo.com/v1/search?name=<city>&count=5&language=es&format=json` → (2) forecast with returned lat/lon: `https://api.open-meteo.com/v1/forecast?...&current=temperature_2m,...` (add `temperature_unit=fahrenheit` for °F).
+- `src/api.ts` — Open-Meteo, **no API key needed**. Two-step flow: (1) geocode city name: `https://geocoding-api.open-meteo.com/v1/search?name=<city>&count=10&language=es&format=json` → (2) forecast with returned lat/lon: `https://api.open-meteo.com/v1/forecast?...&current=temperature_2m,...` (add `temperature_unit=fahrenheit` for °F).
+  - **Ambiguous names**: geocoding must return several candidates (Springfield/San José/Santiago exist in many countries). Results carry `admin1`, `country` and `population`; the selection list shows `region, país · población` (`etiquetaBusqueda` in `src/ui.ts`) so the user can pick the right one. Order is the API's relevance, not population — don't re-sort. The API can also emit fuzzy noise matches (e.g. a nearby unrelated town) and duplicate locations; results are deduped by `lat,lon` id.
 - `src/store.ts` — config persistence (cities, default city, °C/°F, color palette). JSON at OS config dir: `%APPDATA%\weather-cli\config.json` on Windows, `~/.config/weather-cli/` (or `$XDG_CONFIG_HOME`) elsewhere. Load tolerates missing/corrupt file and fills defaults (`paleta: "paleta1"`).
 - `src/ui.ts` — input reader, menu, prompts, climate formatting, colors/palettes.
 
