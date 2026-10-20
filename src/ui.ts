@@ -1,6 +1,6 @@
 import { stdin, stdout } from "node:process";
-import type { Clima, ResultadoBusqueda } from "./api";
-import type { Config, Paleta } from "./store";
+import type { Clima, DiaPronostico, ResultadoBusqueda } from "./api";
+import type { Paleta } from "./store";
 
 // Lector de líneas propio en lugar de node:readline/promises: en Bun la segunda
 // llamada a question() nunca resuelve cuando stdin está redirigido (bug conocido).
@@ -156,6 +156,67 @@ export function fallo(texto: string): void {
   console.log(`  ${errorColor(`✗ ${texto}`)}`);
 }
 
+/**
+ * Indicador de carga para tareas asíncronas. En terminal interactiva muestra
+ * una línea con spinner animado (\\r + frames); con la salida redirigida
+ * imprime un único mensaje estático (sin \\r, así los scripts/tests no ven
+ * basura). Nunca toca stdin, así que no interfiere con leerLinea().
+ *
+ * Uso:
+ *   const carga = iniciarCarga("Buscando ciudades...");
+ *   try { ... } finally { carga.terminar(); }
+ */
+export interface Carga {
+  /** Actualiza el mensaje mostrado (p. ej. con un contador "2/5"). */
+  texto(nuevo: string): void;
+  /** Limpia la línea y detiene el spinner. Llamar siempre en finally. */
+  terminar(): void;
+}
+
+const FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠻"];
+
+export function iniciarCarga(mensaje: string): Carga {
+  const animado = COLOR && Boolean(stdout.isTTY);
+  let texto = mensaje;
+  let frame = 0;
+  let anchoLinea = 0;
+  let vivo = true;
+
+  if (!animado) {
+    console.log(`  ${gris(`⏳ ${texto}`)}`);
+    return {
+      texto(nuevo) {
+        texto = nuevo;
+      },
+      terminar() {
+        vivo = false;
+      },
+    };
+  }
+
+  const pintarFrame = (): void => {
+    const linea = `  ${gris(`${FRAMES[frame % FRAMES.length]} ${texto}`)}`;
+    frame++;
+    // Padding con espacios para borrar cualquier residual de la línea anterior.
+    stdout.write(`\r${linea}${" ".repeat(Math.max(0, anchoLinea - linea.length))}`);
+    anchoLinea = linea.length;
+  };
+  pintarFrame();
+  const timer = setInterval(pintarFrame, 80);
+
+  return {
+    texto(nuevo) {
+      texto = nuevo;
+    },
+    terminar() {
+      if (!vivo) return;
+      vivo = false;
+      clearInterval(timer);
+      stdout.write(`\r${" ".repeat(anchoLinea)}\r`);
+    },
+  };
+}
+
 /** Muestra de los colores de la paleta actual, para previsualizar antes de elegir. */
 export function previewPaleta(paleta: Paleta): string {
   const anterior = paletaActual;
@@ -171,9 +232,14 @@ export function previewPaleta(paleta: Paleta): string {
 }
 
 const LINEA = "═".repeat(43);
-const OPCIONES_VALIDAS = ["1", "2", "3", "4", "5", "8", "9"];
 
-function etiquetaPaleta(p: Paleta): string {
+/** Entrada del menú principal: el id es lo que se teclea, la etiqueta lo que se muestra. */
+export interface OpcionMenu {
+  id: string;
+  etiqueta: string;
+}
+
+export function etiquetaPaleta(p: Paleta): string {
   return p === "paleta1" ? "Paleta 1" : p === "paleta2" ? "Paleta 2" : "Paleta 3";
 }
 
@@ -187,25 +253,20 @@ export async function pausar(): Promise<void> {
   await leerLinea();
 }
 
-export async function menu(config: Config): Promise<string> {
-  const total = config.ciudades.length;
-  const unidad = config.unidad === "C" ? "°C" : "°F";
+export async function menu(opciones: ReadonlyArray<OpcionMenu>): Promise<string | null> {
   console.log(menuColor(`\n${LINEA}`));
   console.log(menuColor(negrita("         WEATHER CLI")));
   console.log(menuColor(LINEA));
-  console.log(`  ${menuColor("1.")} Clima de ciudad default`);
-  console.log(`  ${menuColor("2.")} Clima de todas las ciudades (${total})`);
-  console.log(`  ${menuColor("3.")} Buscar y agregar ciudad`);
-  console.log(`  ${menuColor("4.")} Eliminar ciudad`);
-  console.log(`  ${menuColor("5.")} Establecer ciudad default`);
-  console.log(`  ${menuColor("8.")} Ajustes (${unidad} · ${etiquetaPaleta(config.paleta)})`);
-  console.log(`  ${menuColor("9.")} Salir`);
+  for (const op of opciones) {
+    console.log(`  ${menuColor(`${op.id}.`)} ${op.etiqueta}`);
+  }
   console.log(menuColor(LINEA));
 
   while (true) {
     stdout.write(menuColor("  Selecciona una opción: "));
-    const op = (await leerLinea())?.trim() ?? "9"; // EOF = salir limpiamente
-    if (OPCIONES_VALIDAS.includes(op)) return op;
+    const r = (await leerLinea())?.trim() ?? null;
+    if (r === null) return null; // EOF = salir limpiamente
+    if (opciones.some((op) => op.id === r)) return r;
     fallo("Opción no válida, intenta de nuevo.");
   }
 }
@@ -251,6 +312,94 @@ export function fmtClima(nombre: string, c: Clima): string {
   if (c.humedad !== null) lineas.push(`  💧 Humedad: ${c.humedad}%`);
   if (c.viento !== null) lineas.push(`  💨 Viento: ${c.viento} km/h`);
   if (c.hora) lineas.push(gris(`  🕒 Hora local: ${c.hora.replace("T", " ")}`));
+  return lineas.join("\n");
+}
+
+// Pronóstico de 7 días ------------------------------------------------------
+
+const DIAS_CORTOS = ["dom", "lun", "mar", "mié", "jue", "vie", "sáb"];
+
+/** "2026-10-20" → "lun 20/10" (día de la semana en el huso de la ubicación). */
+function fechaCorta(fecha: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(fecha);
+  if (!m) return fecha;
+  const [, a, b, c] = m;
+  if (!a || !b || !c) return fecha;
+  // Se parsea en UTC para que el huso de la máquina no corrija la fecha.
+  const dow = new Date(Date.UTC(Number(a), Number(b) - 1, Number(c))).getUTCDay();
+  return `${DIAS_CORTOS[dow]} ${c}/${b}`;
+}
+
+/**
+ * Código WMO (Open-Meteo) → emoji + descripción en español.
+ * -1 o desconocido = nubes genéricas por si la API agrega códigos nuevos.
+ */
+function condicion(codigo: number): string {
+  switch (codigo) {
+    case 0:
+      return "☀️ Despejado";
+    case 1:
+      return "🌤 Mayormente despejado";
+    case 2:
+      return "⛅ Parcialmente nublado";
+    case 3:
+      return "☁️ Nublado";
+    case 45:
+    case 48:
+      return "🌫 Niebla";
+    case 51:
+    case 53:
+    case 55:
+    case 56:
+    case 57:
+      return "🌦 Llovizna";
+    case 61:
+    case 63:
+    case 65:
+    case 66:
+    case 67:
+      return "🌧 Lluvia";
+    case 71:
+    case 73:
+    case 75:
+    case 77:
+      return "❄️ Nieve";
+    case 80:
+    case 81:
+    case 82:
+      return "🌦 Chubascos";
+    case 85:
+    case 86:
+      return "🌨 Chubascos de nieve";
+    case 95:
+    case 96:
+    case 99:
+      return "⛈ Tormenta";
+    default:
+      return "☁️ —";
+  }
+}
+
+/**
+ * Tabla del pronóstico de 7 días. Las columnas se alinean con padEnd/padStart
+ * sobre texto plano y solo después se colorea, así los códigos ANSI no
+ * desalinean la tabla.
+ */
+export function fmtPronostico(nombre: string, dias: DiaPronostico[]): string {
+  const s = dias[0]?.unidad === "F" ? "°F" : "°C";
+  const lineas = [`\n  ${menuColor("📅 " + negrita(`Pronóstico de 7 días — ${nombre}`))}`, ""];
+  for (const d of dias) {
+    const fecha = fechaCorta(d.fecha).padEnd(9);
+    const cond = condicion(d.codigo).padEnd(23);
+    const max = d.tempMax !== null ? `${d.tempMax}` : "–";
+    const min = d.tempMin !== null ? `${d.tempMin} ${s}` : "–";
+    const rango = `${max} / ${min}`.padStart(17);
+    const precip = (d.precipitacion !== null ? `${d.precipitacion}%` : "–").padStart(4);
+    const viento = (d.viento !== null ? `${d.viento} km/h` : "–").padStart(8);
+    lineas.push(
+      `  ${menuColor(fecha)} ${cond} ${tempColor(rango)}  💧 ${gris(precip)}  💨 ${gris(viento)}`,
+    );
+  }
   return lineas.join("\n");
 }
 

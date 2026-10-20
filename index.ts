@@ -1,27 +1,43 @@
-import { buscarCiudad, obtenerClima } from "./src/api";
-import { cargar, guardar, type Ciudad, type Paleta } from "./src/store";
+import { buscarCiudad, obtenerClima, obtenerPronostico7dias } from "./src/api";
+import { ajustes } from "./src/settings";
+import { cargar, guardar, type Ciudad } from "./src/store";
 import {
   aviso,
   establecerPaleta,
   etiquetaBusqueda,
+  etiquetaPaleta,
   exito,
   fallo,
   fmtClima,
+  fmtPronostico,
   info,
+  iniciarCarga,
   menu,
   msgError,
   pausar,
   preguntar,
-  previewPaleta,
   seleccionar,
 } from "./src/ui";
 
 const config = await cargar();
 establecerPaleta(config.paleta);
 
-async function climaDe(ciudad: Ciudad): Promise<void> {
+/** Ejecuta una tarea asíncrona con indicador de carga; el spinner se limpia siempre. */
+async function conCarga<T>(mensaje: string, fn: () => Promise<T>): Promise<T> {
+  const carga = iniciarCarga(mensaje);
   try {
-    const clima = await obtenerClima(ciudad.lat, ciudad.lon, config.unidad);
+    return await fn();
+  } finally {
+    carga.terminar();
+  }
+}
+
+async function climaDe(ciudad: Ciudad, mensaje?: string): Promise<void> {
+  try {
+    const clima = await conCarga(
+      mensaje ?? `Obteniendo clima de ${ciudad.detalle}`,
+      () => obtenerClima(ciudad.lat, ciudad.lon, config.unidad),
+    );
     console.log(fmtClima(ciudad.detalle, clima));
   } catch (e) {
     fallo(`No se pudo obtener el clima de ${ciudad.detalle}: ${msgError(e)}`);
@@ -40,11 +56,16 @@ async function climaDefault(): Promise<void> {
 
 // 2. Clima de todas las ciudades
 async function climaTodas(): Promise<void> {
-  if (config.ciudades.length === 0) {
+  const total = config.ciudades.length;
+  if (total === 0) {
     aviso("No hay ciudades guardadas. Usa la opción 3 para agregar una.");
     return;
   }
-  for (const ciudad of config.ciudades) await climaDe(ciudad);
+  for (let i = 0; i < total; i++) {
+    const ciudad = config.ciudades[i];
+    if (!ciudad) continue;
+    await climaDe(ciudad, `Obteniendo clima (${i + 1}/${total}): ${ciudad.detalle}`);
+  }
 }
 
 // 3. Buscar y agregar ciudad
@@ -54,7 +75,7 @@ async function buscarAgregar(): Promise<void> {
 
   let resultados;
   try {
-    resultados = await buscarCiudad(nombre);
+    resultados = await conCarga(`Buscando "${nombre}"...`, () => buscarCiudad(nombre));
   } catch (e) {
     fallo(`Error al buscar: ${msgError(e)}`);
     return;
@@ -119,68 +140,67 @@ async function establecerDefault(): Promise<void> {
   exito(`"${ciudad.detalle}" ahora es la ciudad default.`);
 }
 
-// 8. Ajustes: unidad de temperatura y paleta de colores
-const PALETAS: Array<{ id: Paleta; descripcion: string }> = [
-  { id: "paleta1", descripcion: "Paleta 1: cyan (menú), amarillo (temp), verde/rojo (ok/error)" },
-  { id: "paleta2", descripcion: "Paleta 2: rojo (menú), amarillo (temp), azul (ok/error)" },
-  { id: "paleta3", descripcion: "Paleta 3: verde (menú), azul (temp), amarillo (ok/error)" },
-];
-
-async function ajustes(): Promise<void> {
-  const opcion = await seleccionar(
-    ["Cambiar unidad de temperatura (°C / °F)", "Cambiar paleta de colores"],
-    "Ajustes:",
-  );
-  if (opcion === null) return;
-
-  if (opcion === 0) {
-    config.unidad = config.unidad === "C" ? "F" : "C";
-    await guardar(config);
-    exito(`Unidad de temperatura: ${config.unidad === "C" ? "°C" : "°F"}`);
-    return;
+// 6. Pronóstico 7 días
+async function pronostico7dias(): Promise<void> {
+  const ciudad = await elegirDeLaLista("¿De qué ciudad quieres ver el pronóstico de 7 días?");
+  if (!ciudad) return;
+  try {
+    const dias = await conCarga(
+      `Obteniendo pronóstico de ${ciudad.detalle}`,
+      () => obtenerPronostico7dias(ciudad.lat, ciudad.lon, config.unidad),
+    );
+    console.log(fmtPronostico(ciudad.detalle, dias));
+  } catch (e) {
+    fallo(`No se pudo obtener el pronóstico de ${ciudad.detalle}: ${msgError(e)}`);
   }
+}
 
-  const elegida = await seleccionar(
-    PALETAS.map((p) => p.descripcion),
-    "Paleta de colores:",
-  );
-  if (elegida === null) return;
-  const paleta = PALETAS[elegida];
-  if (!paleta) return;
-  config.paleta = paleta.id;
-  establecerPaleta(paleta.id);
-  await guardar(config);
-  console.log(previewPaleta(paleta.id));
-  exito(`Paleta aplicada: ${paleta.id}`);
+// Opciones del menú: fuente única (id + etiqueta + handler). El menú se
+// renderiza y valida a partir de esta lista; el bucle principal solo
+// dispatchea. Para añadir una opción basta con agregar una entrada aquí.
+interface Opcion {
+  id: string;
+  etiqueta: string;
+  handler: () => Promise<void>;
+}
+
+function opciones(): Opcion[] {
+  const unidad = config.unidad === "C" ? "°C" : "°F";
+  return [
+    { id: "1", etiqueta: "Clima de ciudad default", handler: climaDefault },
+    {
+      id: "2",
+      etiqueta: `Clima de todas las ciudades (${config.ciudades.length})`,
+      handler: climaTodas,
+    },
+    { id: "3", etiqueta: "Buscar y agregar ciudad", handler: buscarAgregar },
+    { id: "4", etiqueta: "Eliminar ciudad", handler: eliminarCiudad },
+    { id: "5", etiqueta: "Establecer ciudad default", handler: establecerDefault },
+    { id: "6", etiqueta: "Pronóstico 7 días", handler: pronostico7dias },
+    {
+      id: "8",
+      etiqueta: `Ajustes (${unidad} · ${etiquetaPaleta(config.paleta)})`,
+      handler: () => ajustes(config),
+    },
+    {
+      id: "9",
+      etiqueta: "Salir",
+      handler: async () => {
+        salir = true;
+      },
+    },
+  ];
 }
 
 let salir = false;
 while (!salir) {
-  const op = await menu(config);
+  const lista = opciones();
+  const op = await menu(lista);
+  if (op === null) break; // EOF = salir limpiamente
+  const opcion = lista.find((o) => o.id === op);
+  if (!opcion) continue;
   try {
-    switch (op) {
-      case "1":
-        await climaDefault();
-        break;
-      case "2":
-        await climaTodas();
-        break;
-      case "3":
-        await buscarAgregar();
-        break;
-      case "4":
-        await eliminarCiudad();
-        break;
-      case "5":
-        await establecerDefault();
-        break;
-      case "8":
-        await ajustes();
-        break;
-      case "9":
-        salir = true;
-        break;
-    }
+    await opcion.handler();
   } catch (e) {
     fallo(`Error: ${msgError(e)}`);
   }

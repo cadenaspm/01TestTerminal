@@ -7,7 +7,14 @@ Bun + TypeScript CLI weather app. Entry point: root `index.ts` (main menu loop).
 - `src/api.ts` — Open-Meteo, **no API key needed**. Two-step flow: (1) geocode city name: `https://geocoding-api.open-meteo.com/v1/search?name=<city>&count=10&language=es&format=json` → (2) forecast with returned lat/lon: `https://api.open-meteo.com/v1/forecast?...&current=temperature_2m,...` (add `temperature_unit=fahrenheit` for °F).
   - **Ambiguous names**: geocoding must return several candidates (Springfield/San José/Santiago exist in many countries). Results carry `admin1`, `country` and `population`; the selection list shows `region, país · población` (`etiquetaBusqueda` in `src/ui.ts`) so the user can pick the right one. Order is the API's relevance, not population — don't re-sort. The API can also emit fuzzy noise matches (e.g. a nearby unrelated town) and duplicate locations; results are deduped by `lat,lon` id.
 - `src/store.ts` — config persistence (cities, default city, °C/°F, color palette). JSON at OS config dir: `%APPDATA%\weather-cli\config.json` on Windows, `~/.config/weather-cli/` (or `$XDG_CONFIG_HOME`) elsewhere. Load tolerates missing/corrupt file and fills defaults (`paleta: "paleta1"`).
-- `src/ui.ts` — input reader, menu, prompts, climate formatting, colors/palettes.
+- `src/ui.ts` — input reader, menu, prompts, climate formatting, colors/palettes, loading spinner (`iniciarCarga`).
+- `src/settings.ts` — the "8. Ajustes" submenu (temperature unit, color palettes).
+
+## Menu structure (single source of truth)
+
+The main menu is **data-driven**: `opciones()` in `index.ts` returns an array of `{ id, etiqueta, handler }`. `menu()` in `src/ui.ts` renders and validates against that array — there is no hardcoded option list anywhere else, and `index.ts` dispatches via `lista.find(...)` (no `switch`).
+
+**To add a menu option:** append one entry to `opciones()` in `index.ts` with a new `id`, its Spanish `label`, and a `handler` function (new commands live in `index.ts`; settings-style submenus go in `src/settings.ts`). Nothing else to touch — rendering, validation, and dispatch pick it up automatically. `OPCIONES_VALIDAS` no longer exists.
 
 ## Commands
 
@@ -23,7 +30,7 @@ Bun + TypeScript CLI weather app. Entry point: root `index.ts` (main menu loop).
 ## Critical quirks
 
 - **Do not use `node:readline/promises` here**: in Bun on Windows, the second `rl.question()` never resolves when stdin is redirected (first one works — bug hides easily). `src/ui.ts` has a custom line reader over `stdin` 'data' chunks; keep using `leerLinea()`/`preguntar()` for any new prompts. It handles LF, CR, and CRLF (splitting on a lone `\r` must also swallow a following `\n` or every line yields a spurious empty line).
-- EOF on stdin is treated as "9. Salir" so scripted runs exit cleanly.
+- EOF on stdin makes `menu()` return `null`, which ends the main loop, so scripted runs exit cleanly (previously it was faked as "9. Salir").
 - Do **not** edit `config.json` with PowerShell (`Get-Content`/`Set-Content`/`ConvertTo-Json` in PS 5.1 assume ANSI and corrupt the Spanish accents, e.g. "Popayán" → "Popayǭn"). Use Bun (`Bun.file`/`Bun.write`) or another UTF-8 tool.
 
 ## Conventions
