@@ -1,22 +1,5 @@
-import type { Unidad } from "./store";
-
-export interface ResultadoBusqueda {
-  id: string;
-  nombre: string;
-  detalle: string;
-  lat: number;
-  lon: number;
-  poblacion: number | null;
-}
-
-interface ResultadoGeocoding {
-  name: string;
-  latitude: number;
-  longitude: number;
-  country?: string;
-  admin1?: string;
-  population?: number;
-}
+import type { Unit } from "../types/Config";
+import type { DailyForecast, Weather } from "../types/Weather";
 
 interface RespuestaForecast {
   current?: {
@@ -26,15 +9,6 @@ interface RespuestaForecast {
     relative_humidity_2m?: number | null;
     wind_speed_10m?: number | null;
   };
-}
-
-export interface Clima {
-  temperatura: number;
-  sensacion: number | null;
-  humedad: number | null;
-  viento: number | null;
-  hora: string | null;
-  unidad: Unidad;
 }
 
 interface RespuestaForecastDiario {
@@ -48,61 +22,12 @@ interface RespuestaForecastDiario {
   };
 }
 
-export interface DiaPronostico {
-  fecha: string; // "YYYY-MM-DD" (día local de la ubicación)
-  codigo: number; // código WMO, para elegir emoji/descripción
-  tempMax: number | null;
-  tempMin: number | null;
-  precipitacion: number | null; // % máximo del día
-  viento: number | null; // km/h máxima del día
-  unidad: Unidad;
-}
-
-/**
- * Paso 1: resuelve el nombre de una ciudad a coordenadas (Geocoding API).
- * Trae hasta 10 coincidencias: los nombres ambiguos (Springfield, San José,
- * Santiago…) existen en varias regiones/países y hay que ofrecer alternativas
- * con país, región y población para elegir la correcta. El orden es por
- * relevancia de la API, no por población.
- */
-export async function buscarCiudad(nombre: string): Promise<ResultadoBusqueda[]> {
-  const url = new URL("https://geocoding-api.open-meteo.com/v1/search");
-  url.searchParams.set("name", nombre);
-  url.searchParams.set("count", "10");
-  url.searchParams.set("language", "es");
-  url.searchParams.set("format", "json");
-
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`La API de geocoding respondió ${res.status}`);
-
-  const data = (await res.json()) as { results?: ResultadoGeocoding[] };
-  const vistos = new Set<string>();
-  const resultados: ResultadoBusqueda[] = [];
-  for (const r of data.results ?? []) {
-    const id = `${r.latitude},${r.longitude}`;
-    if (vistos.has(id)) continue; // la API puede repetir ubicaciones
-    vistos.add(id);
-    const partes = [r.name, r.admin1, r.country].filter(
-      (p): p is string => typeof p === "string" && p.length > 0,
-    );
-    resultados.push({
-      id,
-      nombre: r.name,
-      detalle: partes.join(", "),
-      lat: r.latitude,
-      lon: r.longitude,
-      poblacion: typeof r.population === "number" ? r.population : null,
-    });
-  }
-  return resultados;
-}
-
 /** Paso 2: obtiene el clima actual para unas coordenadas (Forecast API). */
 export async function obtenerClima(
   lat: number,
   lon: number,
-  unidad: Unidad,
-): Promise<Clima> {
+  unidad: Unit,
+): Promise<Weather> {
   const url = new URL("https://api.open-meteo.com/v1/forecast");
   url.searchParams.set("latitude", lat.toFixed(4));
   url.searchParams.set("longitude", lon.toFixed(4));
@@ -132,9 +57,7 @@ export async function obtenerClima(
         ? actual.relative_humidity_2m
         : null,
     viento:
-      typeof actual.wind_speed_10m === "number"
-        ? actual.wind_speed_10m
-        : null,
+      typeof actual.wind_speed_10m === "number" ? actual.wind_speed_10m : null,
     hora: typeof actual.time === "string" ? actual.time : null,
     unidad,
   };
@@ -148,8 +71,8 @@ export async function obtenerClima(
 export async function obtenerPronostico7dias(
   lat: number,
   lon: number,
-  unidad: Unidad,
-): Promise<DiaPronostico[]> {
+  unidad: Unit,
+): Promise<DailyForecast[]> {
   const url = new URL("https://api.open-meteo.com/v1/forecast");
   url.searchParams.set("latitude", lat.toFixed(4));
   url.searchParams.set("longitude", lon.toFixed(4));

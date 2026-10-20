@@ -1,24 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
-
-export type Unidad = "C" | "F";
-
-export interface Ciudad {
-  id: string; // "lat,lon" — único por ubicación
-  nombre: string;
-  detalle: string;
-  lat: number;
-  lon: number;
-}
-
-export type Paleta = "paleta1" | "paleta2" | "paleta3";
-
-export interface Config {
-  ciudades: Ciudad[];
-  default: string | null; // id de la ciudad default
-  unidad: Unidad;
-  paleta: Paleta;
-}
+import type { City } from "../types/City";
+import type { Config, Palette } from "../types/Config";
 
 /** Directorio de configuración del SO: %APPDATA% en Windows, ~/.config o $XDG_CONFIG_HOME en Unix. */
 function dirConfig(): string {
@@ -42,7 +25,7 @@ export async function cargar(): Promise<Config> {
     return {
       ciudades: Array.isArray(data.ciudades)
         ? data.ciudades.filter(
-            (c): c is Ciudad =>
+            (c): c is City =>
               typeof c?.id === "string" &&
               typeof c.nombre === "string" &&
               typeof c.detalle === "string" &&
@@ -52,9 +35,10 @@ export async function cargar(): Promise<Config> {
         : [],
       default: typeof data.default === "string" ? data.default : null,
       unidad: data.unidad === "F" ? "F" : "C",
-      paleta: (data.paleta === "paleta2" || data.paleta === "paleta3")
-        ? (data.paleta as Paleta)
-        : "paleta1",
+      paleta:
+        data.paleta === "paleta2" || data.paleta === "paleta3"
+          ? (data.paleta as Palette)
+          : "paleta1",
     };
   } catch {
     // Archivo ausente o corrupto: empezamos de cero.

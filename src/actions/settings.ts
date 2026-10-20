@@ -1,16 +1,14 @@
-import { guardar, type Config, type Paleta } from "./store";
-import {
-  establecerPaleta,
-  exito,
-  previewPaleta,
-  seleccionar,
-} from "./ui";
+import { guardar } from "../storage/settingsStorage";
+import type { Config, Palette } from "../types/Config";
+import { establecerPaleta, previewPaleta } from "../utils/colors";
+import { seleccionar } from "../presentation/menu";
+import { exito } from "../presentation/output";
 
 /** Pestañas disponibles dentro de Ajustes (ids = posiciones del menú). */
-export const PALETAS: Array<{ id: Paleta; descripcion: string }> = [
+export const PALETAS: Array<{ id: Palette; descripcion: string }> = [
   { id: "paleta1", descripcion: "Paleta 1: cyan (menú), amarillo (temp), verde/rojo (ok/error)" },
   { id: "paleta2", descripcion: "Paleta 2: rojo (menú), amarillo (temp), azul (ok/error)" },
-  { id: "paleta3", descripcion: "Paleta 3: verde (menú), azul (temp), amarillo (ok/error)" },
+  { id: "paleta3", descripcion: "Paleta 3: verde (menú), Azul (temp), Amarillo (ok/error)" },
 ];
 
 /** 8. Ajustes: unidad de temperatura y paleta de colores. */
