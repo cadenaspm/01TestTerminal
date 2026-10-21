@@ -10,6 +10,8 @@
     "test:watch": "bun test --watch",
     "build": "bun run test && bun run typecheck && bun build --compile src/index.ts --outfile weather",
     "build:release": "bun run test && bun run typecheck && bun build --compile --target=$BUN_TARGET src/index.ts --outfile=$BUN_OUTFILE",
+    "compile:target": "bun build --compile --target=$BUN_TARGET src/index.ts --outfile=$BUN_OUTFILE",
+    "release:local": "bun run scripts/publicar-release.ts",
     "start": "bun run src/index.ts",
     "dev": "bun run src/index.ts --watch"
   },

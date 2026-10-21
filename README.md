@@ -53,8 +53,11 @@ Esta es la apariencia que deseamos crear
 ## Releases (GitHub Actions)
 
 La versión del `package.json` es la fuente de verdad. El workflow `.github/workflows/release.yml`
-compila el binario con `bun run build:release`, crea el tag `v<versión>` y publica la release
-de GitHub con los binarios adjuntos.
+crea el tag `v<versión>` y publica la release de GitHub con los 6 binarios adjuntos.
+
+El workflow corre **un solo job** (no una matriz): la suite de tests se ejecuta una única vez
+y de ahí salen los 6 binarios, así que gasta la mitad de minutos de runner que la versión
+anterior con matriz.
 
 ### Cómo publicar una versión
 
@@ -76,6 +79,10 @@ de GitHub con los binarios adjuntos.
 3. Descarga el binario de tu plataforma desde la pestaña **Releases** de GitHub.
    No necesitas Bun ni Node: es un ejecutable standalone.
 
+> Si el workflow no llega a ejecutarse porque GitHub Actions está bloqueado en tu cuenta
+> (p. ej. *"your account is locked due to a billing issue"*), usa la publicación local
+> que se explica más abajo.
+
 ### Binarios adjuntos
 
 | Sistema | Archivo |
@@ -92,14 +99,48 @@ así que Gatekeeper pedirá que los abras desde *Ajustes → Privacidad y seguri
 
 El workflow también adjunta `checksums.txt` con el SHA-256 de cada binario.
 
+### Publicar la release localmente (sin GitHub Actions)
+
+`scripts/publicar-release.ts` hace lo mismo que el workflow, pero desde tu máquina y sin
+consumir minutos de Actions. Necesitas un token de GitHub con escritura sobre el repo:
+
+- **PAT classic** con el scope `repo`, o
+- **PAT fine-grained** con el permiso *Contents: write* sobre este repositorio.
+
+```powershell
+$env:GITHUB_TOKEN = "ghp_xxx"
+bun run release:local
+```
+
+Qué hace, en orden:
+
+1. Lee la versión del `package.json` y valida el semver.
+2. Consulta si la release ya existe → si existe, **aborta sin tocar nada** (y sin subir el tag).
+3. Compila los 6 binarios en `dist/` y genera `dist/checksums.txt`.
+4. Crea el tag anotado `v<versión>` y lo sube al remoto.
+5. Crea la release y sube los 6 binarios + `checksums.txt` como assets.
+
+Flags útiles:
+
+```bash
+bun run release:local --dry-run      # compila y muestra qué se publicaría, sin tocar GitHub
+bun run release:local --skip-build   # reutiliza los binarios que ya están en dist/
+```
+
+Si no defines `GITHUB_REPOSITORY=owner/repo`, el repo se deduce del remoto `origin` de git.
+
 ### Compilar localmente para otra plataforma
 
 ```bash
-# Linux x64
+# Linux x64, con el gate completo (tests + typecheck)
 $env:BUN_TARGET="bun-linux-x64"
 $env:BUN_OUTFILE="dist/weather-linux-x64"
 bun run build:release
+
+# Solo compilar (sin repetir tests ni typecheck)
+bun run compile:target
 ```
 
 Objetivos disponibles: `bun-linux-x64`, `bun-linux-arm64`, `bun-darwin-x64`, `bun-darwin-arm64`,
 `bun-windows-x64`, `bun-windows-arm64`.
+

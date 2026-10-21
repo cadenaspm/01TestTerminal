@@ -18,26 +18,14 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build:
-    name: Compilar ${{ matrix.target }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: bun-linux-x64
-            archivo: linux-x64
-          - target: bun-linux-arm64
-            archivo: linux-arm64
-          - target: bun-darwin-x64
-            archivo: darwin-x64
-          - target: bun-darwin-arm64
-            archivo: darwin-arm64
-          - target: bun-windows-x64
-            archivo: windows-x64.exe
-          - target: bun-windows-arm64
-            archivo: windows-arm64.exe
+  # Un único job (no una matriz): la suite de tests corre una sola vez en vez de
+  # seis, y el runner se gasta la mitad de minutos para el mismo resultado.
+  release:
+    name: Compilar y publicar
+    # Imagen fijada a propósito: `ubuntu-latest` está migrando a Ubuntu 26 y un
+    # release debe ser reproducible. Cambiar a `ubuntu-24.04` cuando toque.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
 
     steps:
       - name: Obtener el código
@@ -51,37 +39,7 @@ jobs:
       - name: Instalar dependencias
         run: bun install --frozen-lockfile
 
-      - name: Leer la versión del package.json
-        id: pkg
-        run: echo "version=$(jq -r '.version' package.json)" >> "$GITHUB_OUTPUT"
-
-      - name: Construir el binario (${{ matrix.target }})
-        run: bun run build:release
-        env:
-          BUN_TARGET: ${{ matrix.target }}
-          BUN_OUTFILE: dist/weather-${{ steps.pkg.outputs.version }}-${{ matrix.archivo }}
-
-      - name: Publicar el binario como artefacto
-        uses: actions/upload-artifact@v4
-        with:
-          name: weather-${{ matrix.target }}
-          path: dist/weather-${{ steps.pkg.outputs.version }}-${{ matrix.archivo }}
-          if-no-files-found: error
-          retention-days: 7
-
-  release:
-    name: Crear la release en GitHub
-    needs: build
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-
-    steps:
-      - name: Obtener el código
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Validar la versión
+      - name: Leer y validar la versión
         id: pkg
         run: |
           VERSION=$(jq -r '.version // empty' package.json)
@@ -92,11 +50,43 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Descargar los binarios
-        uses: actions/download-artifact@v4
+      # Gate completo: tests + typecheck + binario nativo. Si algo falla, no se
+      # compila ninguna otra plataforma ni se publica nada.
+      - name: Construir el binario nativo (tests + typecheck)
+        run: bun run build
+
+      - name: Compilar el resto de plataformas
+        env:
+          VERSION: ${{ steps.pkg.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          # El runner de ubuntu es x64: este binario ES el asset de Linux x64.
+          mv weather "dist/weather-${VERSION}-linux-x64"
+          for target in bun-windows-x64 bun-windows-arm64 bun-linux-arm64 bun-darwin-x64 bun-darwin-arm64; do
+            case "$target" in
+              bun-windows-x64)   archivo="windows-x64.exe" ;;
+              bun-windows-arm64) archivo="windows-arm64.exe" ;;
+              bun-linux-arm64)   archivo="linux-arm64" ;;
+              bun-darwin-x64)    archivo="darwin-x64" ;;
+              bun-darwin-arm64)  archivo="darwin-arm64" ;;
+            esac
+            echo "Compilando ${target} -> dist/weather-${VERSION}-${archivo}"
+            BUN_TARGET="$target" BUN_OUTFILE="dist/weather-${VERSION}-${archivo}" bun run compile:target
+          done
+
+      - name: Calcular los checksums
+        run: (cd dist && sha256sum weather-* > checksums.txt)
+
+      # Se publica también como artefacto del run para poder descargarlo si la
+      # creación de la release falla.
+      - name: Publicar los binarios como artefacto
+        uses: actions/upload-artifact@v4
         with:
-          path: dist
-          merge-multiple: true
+          name: weather-${{ steps.pkg.outputs.version }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Crear el tag y la release
         env:
@@ -120,8 +110,6 @@ jobs:
             git tag -a "$TAG" -m "Weather CLI v$VERSION"
             git push origin "$TAG"
           fi
-
-          (cd dist && sha256sum weather-* > checksums.txt)
 
           PRERELEASE=""
           if [[ "$VERSION" == *-* ]]; then
