@@ -15,7 +15,7 @@ const CÓDIGOS = {
   paleta3: ["32", "34", "33", "33"],
 } satisfies Record<"paleta1" | "paleta2" | "paleta3", string[]>;
 
-async function enSubproceso(codigo: string, env: Record<string, string> = {}) {
+async function enSubproceso(codigo: string, env: Record<string, string | null> = {}) {
   return correrEscenario(
     `import { previewPaleta, establecerPaleta, obtenerPaleta, menuColor, tempColor, okColor, errorColor, gris, negrita, animacionActiva } from "./src/utils/colors";
 ${codigo}
@@ -32,7 +32,7 @@ function codigoDe(valor: string): string | null {
 test("FORCE_COLOR=1 activa los códigos ANSI", async () => {
   const { salida, codigoSalida } = await enSubproceso(
     `console.log(JSON.stringify(menuColor("x")));`,
-    { FORCE_COLOR: "1" },
+    { NO_COLOR: null, FORCE_COLOR: "1" },
   );
   expect(codigoSalida).toBe(0);
   expect(JSON.parse(salida.trim())).toBe("\u001b[36mx\u001b[0m");
@@ -41,7 +41,7 @@ test("FORCE_COLOR=1 activa los códigos ANSI", async () => {
 test("FORCE_COLOR=0 apaga el color", async () => {
   const { salida, codigoSalida } = await enSubproceso(
     `console.log(JSON.stringify(negrita("x")));`,
-    { FORCE_COLOR: "0" },
+    { NO_COLOR: null, FORCE_COLOR: "0" },
   );
   expect(codigoSalida).toBe(0);
   expect(JSON.parse(salida.trim())).toBe("x");
@@ -53,7 +53,7 @@ test("roles semánticos por paleta", async () => {
   establecerPaleta(p);
   console.log(JSON.stringify([menuColor("m"), tempColor("t"), okColor("o"), errorColor("e")]));
 }`,
-    { FORCE_COLOR: "1" },
+    { NO_COLOR: null, FORCE_COLOR: "1" },
   );
   expect(codigoSalida).toBe(0);
   const lineas = salida.trim().split("\n");
@@ -88,6 +88,7 @@ console.log("PALETA=" + obtenerPaleta());`,
 
 test("animacionActiva exige color y TTY (false con salida redirigida)", async () => {
   const { salida, codigoSalida } = await enSubproceso(`console.log("ANIM=" + animacionActiva());`, {
+    NO_COLOR: null,
     FORCE_COLOR: "1",
   });
   expect(codigoSalida).toBe(0);
@@ -95,11 +96,25 @@ test("animacionActiva exige color y TTY (false con salida redirigida)", async ()
 });
 
 // ---------------------------------------------------------------------------
-// Comportamiento documentado que hoy NO se cumple (ver AGENTS.md): el color
-// debería apagarse al redirigir la salida y NO_COLOR debería ganar sobre
-// FORCE_COLOR. Bun expone el TTY real en `stdout.isTTY`, pero `src/utils/colors.ts`
-// decide según el `COLOR` que Bun calcula al arrancar (`Bun.enableANSIColors`,
-// que da true cuando la salida del subproceso no es un TTY).
+// Precedencia de las variables de color. NO_COLOR gana siempre (convención
+// no-color.org): si el usuario lo define, no se pinta nada aunque también haya
+// FORCE_COLOR. La salida del subproceso no es un TTY, así que sin variables de
+// entorno tampoco debe haber color.
 // ---------------------------------------------------------------------------
-test.todo("sin TTY y sin variables de entorno no se pinta nada");
-test.todo("NO_COLOR gana sobre FORCE_COLOR");
+test("sin TTY y sin variables de entorno no se pinta nada", async () => {
+  const { salida, codigoSalida } = await enSubproceso(
+    `console.log(JSON.stringify(menuColor("x")));`,
+    { NO_COLOR: null, FORCE_COLOR: null },
+  );
+  expect(codigoSalida).toBe(0);
+  expect(JSON.parse(salida.trim())).toBe("x");
+});
+
+test("NO_COLOR gana sobre FORCE_COLOR", async () => {
+  const { salida, codigoSalida } = await enSubproceso(
+    `console.log(JSON.stringify(menuColor("x")));`,
+    { NO_COLOR: "1", FORCE_COLOR: "1" },
+  );
+  expect(codigoSalida).toBe(0);
+  expect(JSON.parse(salida.trim())).toBe("x");
+});

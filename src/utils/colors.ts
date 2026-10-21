@@ -4,10 +4,16 @@ import type { Palette } from "../types/Config";
 // Colores ANSI solo en terminal interactiva; se desactivan al redirigir la
 // salida (tests/scripts) o si el usuario define NO_COLOR. FORCE_COLOR=1 los
 // fuerza y FORCE_COLOR=0 los apaga.
+//
+// Prioridad: NO_COLOR > FORCE_COLOR > detección de TTY. NO_COLOR gana siempre
+// (convención no-color.org): si el usuario lo define, no se pinta nada aunque
+// también haya FORCE_COLOR.
 const COLOR =
-  Bun.env.FORCE_COLOR !== undefined
-    ? Bun.env.FORCE_COLOR !== "0"
-    : Boolean(stdout.isTTY) && Bun.env.NO_COLOR === undefined && Bun.env.TERM !== "dumb";
+  Bun.env.NO_COLOR !== undefined
+    ? false
+    : Bun.env.FORCE_COLOR !== undefined
+      ? Bun.env.FORCE_COLOR !== "0"
+      : Boolean(stdout.isTTY) && Bun.env.TERM !== "dumb";
 
 function pintar(texto: string, codigo: string): string {
   return COLOR ? `\u001b[${codigo}m${texto}\u001b[0m` : texto;

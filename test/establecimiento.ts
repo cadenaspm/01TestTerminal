@@ -54,15 +54,24 @@ export function respuestaJson(data: unknown, status = 200): Response {
  */
 export async function correrEscenario(
   codigo: string,
-  env: Record<string, string> = {},
+  env: Record<string, string | null> = {},
 ): Promise<{ salida: string; codigoSalida: number }> {
   const preload = join(import.meta.dir, "neutralizar-stdin.ts");
+  // Por defecto se fuerza NO_COLOR=1 para que la salida sea texto plano y
+  // determinista. Un valor `null` en `env` ELIMINA la variable del entorno
+  // (necesario en colors.test.ts para poder probar la precedencia entre
+  // NO_COLOR y FORCE_COLOR).
+  const entorno: Record<string, string> = { ...Bun.env, NO_COLOR: "1" };
+  for (const [clave, valor] of Object.entries(env)) {
+    if (valor === null) delete entorno[clave];
+    else entorno[clave] = valor;
+  }
   const proc = Bun.spawn(["bun", "--preload", preload, "-"], {
     cwd: RAIZ,
     stdin: new TextEncoder().encode(codigo),
     stdout: "pipe",
     stderr: "pipe",
-    env: { ...Bun.env, NO_COLOR: "1", ...env },
+    env: entorno,
   });
   const [salida, err, codigoSalida] = await Promise.all([
     new Response(proc.stdout).text(),

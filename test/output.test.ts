@@ -6,7 +6,7 @@ import { correrEscenario } from "./establecimiento";
  * importar), así que los casos viven en subprocesos: con FORCE_COLOR=1 para
  * comprobar los ANSI y con colores apagados para el texto plano.
  */
-function escenario(env: Record<string, string> = {}) {
+function escenario(env: Record<string, string | null> = {}) {
   return correrEscenario(
     `
 const { info, exito, aviso, fallo, msgError, iniciarCarga, conCarga } = await import("./src/presentation/output");
@@ -44,7 +44,10 @@ describe("mensajes", () => {
   });
 
   test("con FORCE_COLOR cada rol usa su color", async () => {
-    const { salida } = await escenario({ FORCE_COLOR: "1" });
+    // NO_COLOR se quita a propósito: `correrEscenario` lo fuerza por defecto
+    // para que el resto de casos salga en texto plano, y NO_COLOR tiene
+    // prioridad sobre FORCE_COLOR.
+    const { salida } = await escenario({ NO_COLOR: null, FORCE_COLOR: "1" });
     expect(salida).toContain("\u001b[36m"); // menú (info) en paleta 1
     expect(salida).toContain("\u001b[32m"); // ok (exito)
     expect(salida).toContain("\u001b[33m"); // temp (aviso)

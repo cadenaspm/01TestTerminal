@@ -1,5 +1,7 @@
 weather
 weather.exe
+# staging files de `bun build --compile` (se quedan si el build se interrumpe)
+*.bun-build
 
 # dependencies (bun install)
 node_modules

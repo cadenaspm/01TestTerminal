@@ -2,10 +2,17 @@ import { describe, expect, test } from "bun:test";
 import type { CitySearchResult } from "../src/types/City";
 import type { DailyForecast, Weather } from "../src/types/Weather";
 
-// Sin TTY los colores están apagados, así que la salida es texto plano, pero
-// FORCE_COLOR tiene prioridad: hay que borrarlo para que no contamine el texto.
+// Los formatters colorean parte del texto (etiqueta, temperatura, guiones) y
+// los asserts buscan subcadenas exactas, así que los códigos ANSI los rompen:
+// se meten ENTRE la etiqueta y el valor ("Temperatura: \x1b[33m21.5 °C").
+//
+// NO se puede confiar en "sin TTY ⇒ sin color": al ejecutar `bun test` en una
+// terminal real la salida SÍ es un TTY, `colors.ts` activa el color y estos
+// tests fallan (4 de ellos) de forma intermitente según dónde se ejecuten.
+// Se fuerza NO_COLOR=1, que apaga el color pase lo que pase, porque
+// `src/utils/colors.ts` decide al importarse.
 delete Bun.env.FORCE_COLOR;
-delete Bun.env.NO_COLOR;
+Bun.env.NO_COLOR = "1";
 
 const { etiquetaBusqueda, etiquetaPaleta, fmtClima, fmtPoblacion, fmtPronostico } = await import(
   "../src/utils/format"
