@@ -2,6 +2,8 @@ weather
 weather.exe
 # staging files de `bun build --compile` (se quedan si el build se interrumpe)
 *.bun-build
+# runtimes de destino que descarga Bun al hacer cross-compile (`--target=`)
+.bun-cache
 
 # dependencies (bun install)
 node_modules

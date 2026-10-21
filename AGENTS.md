@@ -42,7 +42,11 @@ The main menu is **data-driven**: `opciones()` in `src/index.ts` returns a `Menu
 - Test: `bun run test` → `bun test` (Bun's built-in runner; no dependencies). `bun run test:watch` for watch mode, `bun test test/storage.test.ts` to run one file, `bun test --coverage` for coverage.
 - Build: `bun run build` → **gated on tests and typecheck**: `bun run test && bun run typecheck && bun build --compile src/index.ts --outfile weather` (standalone `weather.exe`; ignored by `.gitignore`). A failing test aborts the build before anything is compiled.
   - Do **not** drop `--compile` for a plain bundling command such as `bun build src/index.ts --outdir dist` without `--target bun`: Bun then defaults to a browser target and the `node:process` polyfill lacks `stdin`/`stdout`, so `src/presentation/input.ts` fails to bundle.
-- There is **no** lint, formatter, or CI. Don't guess their commands — if you add one, record it here.
+- Build for a specific target (used by the release workflow): `bun run build:release` → same gate, but compiles with `--target=$BUN_TARGET` and writes to `--outfile=$BUN_OUTFILE` (both env vars are required; Bun expands `$VAR` in scripts on every platform).
+- **Release**: `.github/workflows/release.yml` — on push to `master` that touches `package.json` (and on manual `workflow_dispatch`) it builds the 6 cross-compiled binaries, pushes the tag `v<version>` (from `package.json`) and publishes a GitHub Release with the binaries + `checksums.txt`. Release notes live in `.github/release-notes.md`.
+  - Cross-compiling downloads the target Bun runtime into `.bun-cache/` inside the repo (gitignored).
+  - macOS binaries are **unsigned**: Gatekeeper blocks the first launch.
+- There is **no** lint or formatter. Don't guess their commands — if you add one, record it here. The only CI is the release workflow (`.github/workflows/release.yml`); there are no test/lint pipelines.
 - Smoke test the interactive CLI by feeding a script of inputs, e.g. a text file with one line per prompt (menu option → answers → empty line for each "Presiona Enter"):
   `cmd /c "bun src\index.ts < ""C:\path\to\inputs.txt"""`
   - Use **cmd** for redirection: PowerShell doesn't support `<`, and piping an array into the process hangs. Quote the path (user dirs contain spaces).

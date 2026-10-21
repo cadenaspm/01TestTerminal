@@ -1,0 +1,137 @@
+name: Release
+
+# Se dispara cuando cambia la versión en package.json (push a master) o a mano.
+# La versión del package.json es la fuente de verdad: de ahí sale el tag (v1.0.0).
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - package.json
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Compilar ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: bun-linux-x64
+            archivo: linux-x64
+          - target: bun-linux-arm64
+            archivo: linux-arm64
+          - target: bun-darwin-x64
+            archivo: darwin-x64
+          - target: bun-darwin-arm64
+            archivo: darwin-arm64
+          - target: bun-windows-x64
+            archivo: windows-x64.exe
+          - target: bun-windows-arm64
+            archivo: windows-arm64.exe
+
+    steps:
+      - name: Obtener el código
+        uses: actions/checkout@v4
+
+      - name: Instalar Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Instalar dependencias
+        run: bun install --frozen-lockfile
+
+      - name: Leer la versión del package.json
+        id: pkg
+        run: echo "version=$(jq -r '.version' package.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Construir el binario (${{ matrix.target }})
+        run: bun run build:release
+        env:
+          BUN_TARGET: ${{ matrix.target }}
+          BUN_OUTFILE: dist/weather-${{ steps.pkg.outputs.version }}-${{ matrix.archivo }}
+
+      - name: Publicar el binario como artefacto
+        uses: actions/upload-artifact@v4
+        with:
+          name: weather-${{ matrix.target }}
+          path: dist/weather-${{ steps.pkg.outputs.version }}-${{ matrix.archivo }}
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: Crear la release en GitHub
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Obtener el código
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validar la versión
+        id: pkg
+        run: |
+          VERSION=$(jq -r '.version // empty' package.json)
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::La versión '$VERSION' del package.json no es un semver válido."
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Descargar los binarios
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Crear el tag y la release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.pkg.outputs.tag }}
+          VERSION: ${{ steps.pkg.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "::notice::La release $TAG ya existe: no se vuelve a publicar."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "::notice::El tag $TAG ya existe en el remoto: se reutiliza."
+          else
+            git tag -a "$TAG" -m "Weather CLI v$VERSION"
+            git push origin "$TAG"
+          fi
+
+          (cd dist && sha256sum weather-* > checksums.txt)
+
+          PRERELEASE=""
+          if [[ "$VERSION" == *-* ]]; then
+            PRERELEASE="--prerelease"
+          fi
+
+          gh release create "$TAG" \
+            --title "Weather CLI v$VERSION" \
+            --generate-notes \
+            --notes-file .github/release-notes.md \
+            $PRERELEASE \
+            dist/weather-* \
+            dist/checksums.txt
