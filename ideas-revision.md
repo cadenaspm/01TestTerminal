@@ -7,7 +7,7 @@
     - Paleta 3: Verde (menú), Azul (temp), Amarillo (ok/error).
 -[x] **AGENTS.md:** dice que `index.ts` es stub, pero la app ya funciona — hay que actualizarlo.
 -[x] **Ciudades:** geocoding solo trae 1 resultado; nombres ambiguos pueden fallar.
--[ ] **Tests:** no existen; conviene al menos probar storage y las APIs con mocks.
+-[x] **Tests:** suite completa en `test/` con `bun test` (formatters, storage, APIs con `fetch` falso, presentación, acciones y E2E del binario); `bun run build` falla si los tests fallan.
 -[X] **Binario:** compila bien; revisar que `./weather` guarde datos en `~/.config/weather-cli/`.
 -[X] **Escalabilidad:** ¿qué tan fácil será expandir con nuevas funcionalidades?
 -[X] **Carga:** ¿hay estado de carga en las tareas asíncronas?
